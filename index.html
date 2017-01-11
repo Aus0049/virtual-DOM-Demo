@@ -6,9 +6,13 @@
 <body>
 <div id="container"></div>
 </body>
+<!-- 使用jq来简化代码 实际上react并不依赖jquery -->
+<!-- jq不会过时 因为jquery已经被融合到ES标准中去了 -->
 <script src="http://static.xinrenxinshi.com/plugins/jquery.min.1.11.1.js"></script>
 <script type="text/javascript" src="./React.js"></script>
 <script type="text/javascript">
-React.render('hello world',document.getElementById("container"))
+// React.render('hello world',document.getElementById("container"));
+var element = React.createElement('div', {style: {width: '100px', height: '100px', background: 'red', color: 'white', textAlign: "center", lineHeight: "100px"}}, "box");
+React.render(element, document.getElementById("container"));
 </script>
 </html>
