@@ -25,6 +25,8 @@ var HelloMessage = React.createClass({
     console.log('我已经渲染好了。。。')
   },
   render: function() {
+    // React中 render return出去的DOM 都会经过遍历 里边有自定义组件的时候递归解析
+    // 这里不做复杂的解析 只是一个简易的demo
     return React.createElement("div", null, this.state.type, "Hello ", this.props.name);
   }
 });
