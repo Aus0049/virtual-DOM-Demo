@@ -59,6 +59,13 @@ var ReactClass = function(){};
 //留给子类去继承覆盖
 ReactClass.prototype.render = function(){};
 
+//setState
+ReactClass.prototype.setState = function(newState) {
+    //还记得我们在ReactCompositeComponent里面mount的时候 做了赋值
+    //所以这里可以拿到 对应的ReactCompositeComponent的实例_reactInternalInstance
+    this._reactInternalInstance.receiveComponent(null, newState);
+}
+
 //component工厂  用来返回一个component实例 这里可以处理各种类型的component
 function instantiateReactComponent(node){
     // 文本节点的情况
@@ -223,5 +230,160 @@ ReactCompositeComponent.prototype.mountComponent = function(rootID){
     });
 
     return renderedMarkup;
+}
+
+//更新
+ReactCompositeComponent.prototype.receiveComponent = function(nextElement, newState) {
+
+    //如果接受了新的，就使用最新的element
+    this._currentElement = nextElement || this._currentElement
+
+    var inst = this._instance;
+    //合并state
+    var nextState = $.extend(inst.state, newState);
+    var nextProps = this._currentElement.props;
+
+    //改写state
+    inst.state = nextState;
+
+    //如果inst有shouldComponentUpdate并且返回false。说明组件本身判断不要更新，就直接返回。
+    if (inst.shouldComponentUpdate && (inst.shouldComponentUpdate(nextProps, nextState) === false)) return;
+
+    //生命周期管理，如果有componentWillUpdate，就调用，表示开始要更新了。
+    if (inst.componentWillUpdate) inst.componentWillUpdate(nextProps, nextState);
+
+
+    var prevComponentInstance = this._renderedComponent;
+    var prevRenderedElement = prevComponentInstance._currentElement;
+    //重新执行render拿到对应的新element;
+    var nextRenderedElement = this._instance.render();
+
+
+    //判断是需要更新还是直接就重新渲染
+    //注意这里的_shouldUpdateReactComponent跟上面的不同哦 这个是全局的方法
+    if (_shouldUpdateReactComponent(prevRenderedElement, nextRenderedElement)) {
+        //如果需要更新，就继续调用子节点的receiveComponent的方法，传入新的element更新子节点。
+        prevComponentInstance.receiveComponent(nextRenderedElement);
+        //调用componentDidUpdate表示更新完成了
+        inst.componentDidUpdate && inst.componentDidUpdate();
+
+    } else {
+        //如果发现完全是不同的两种element，那就干脆重新渲染了
+        var thisID = this._rootNodeID;
+        //重新new一个对应的component，
+        this._renderedComponent = this._instantiateReactComponent(nextRenderedElement);
+        //重新生成对应的元素内容
+        var nextMarkup = _renderedComponent.mountComponent(thisID);
+        //替换整个节点
+        $('[data-reactid="' + this._rootNodeID + '"]').replaceWith(nextMarkup);
+
+    }
+
+}
+
+//用来判定两个element需不需要更新
+//这里的key是我们createElement的时候可以选择性的传入的。用来标识这个element，当发现key不同时，我们就可以直接重新渲染，不需要去更新了。
+var _shouldUpdateReactComponent ＝ function(prevElement, nextElement){
+    if (prevElement != null && nextElement != null) {
+    var prevType = typeof prevElement;
+    var nextType = typeof nextElement;
+    if (prevType === 'string' || prevType === 'number') {
+      return nextType === 'string' || nextType === 'number';
+    } else {
+      return nextType === 'object' && prevElement.type === nextElement.type && prevElement.key === nextElement.key;
+    }
+  }
+  return false;
+}
+
+ReactDOMTextComponent.prototype.receiveComponent = function(nextText) {
+    var nextStringText = '' + nextText;
+    //跟以前保存的字符串比较
+    if (nextStringText !== this._currentElement) {
+        this._currentElement = nextStringText;
+        //替换整个节点
+        $('[data-reactid="' + this._rootNodeID + '"]').html(this._currentElement);
+
+    }
+}
+
+ReactDOMComponent.prototype.receiveComponent = function(nextElement) {
+    var lastProps = this._currentElement.props;
+    var nextProps = nextElement.props;
+
+    this._currentElement = nextElement;
+    //需要单独的更新属性
+    this._updateDOMProperties(lastProps, nextProps);
+    //再更新子节点
+    this._updateDOMChildren(nextElement.props.children);
+}
+
+ReactDOMComponent.prototype._updateDOMProperties = function(lastProps, nextProps) {
+    var propKey;
+    //遍历，当一个老的属性不在新的属性集合里时，需要删除掉。
+
+    for (propKey in lastProps) {
+        //新的属性里有，或者propKey是在原型上的直接跳过。这样剩下的都是不在新属性集合里的。需要删除
+        if (nextProps.hasOwnProperty(propKey) || !lastProps.hasOwnProperty(propKey)) {
+            continue;
+        }
+        //对于那种特殊的，比如这里的事件监听的属性我们需要去掉监听
+        if (/^on[A-Za-z]/.test(propKey)) {
+            var eventType = propKey.replace('on', '');
+            //针对当前的节点取消事件代理
+            $(document).undelegate('[data-reactid="' + this._rootNodeID + '"]', eventType, lastProps[propKey]);
+            continue;
+        }
+
+        //从dom上删除不需要的属性
+        $('[data-reactid="' + this._rootNodeID + '"]').removeAttr(propKey)
+    }
+
+    //对于新的属性，需要写到dom节点上
+    for (propKey in nextProps) {
+        //对于事件监听的属性我们需要特殊处理
+        if (/^on[A-Za-z]/.test(propKey)) {
+            var eventType = propKey.replace('on', '');
+            //以前如果已经有，说明有了监听，需要先去掉
+            lastProps[propKey] && $(document).undelegate('[data-reactid="' + this._rootNodeID + '"]', eventType, lastProps[propKey]);
+            //针对当前的节点添加事件代理,以_rootNodeID为命名空间
+            $(document).delegate('[data-reactid="' + this._rootNodeID + '"]', eventType + '.' + this._rootNodeID, nextProps[propKey]);
+            continue;
+        }
+
+        if (propKey == 'children') continue;
+
+        //添加新的属性，或者是更新老的同名属性
+        $('[data-reactid="' + this._rootNodeID + '"]').prop(propKey, nextProps[propKey])
+    }
+
+}
+
+ReactDOMComponent.prototype.receiveComponent = function(nextElement){
+    var lastProps = this._currentElement.props;
+    var nextProps = nextElement.props;
+
+    this._currentElement = nextElement;
+    //需要单独的更新属性
+    this._updateDOMProperties(lastProps,nextProps);
+    //再更新子节点
+    this._updateDOMChildren(nextProps.children);
+}
+
+//全局的更新深度标识
+var updateDepth = 0;
+//全局的更新队列，所有的差异都存在这里
+var diffQueue = [];
+
+ReactDOMComponent.prototype._updateDOMChildren = function(nextChildrenElements){
+    updateDepth++
+    //_diff用来递归找出差别,组装差异对象,添加到更新队列diffQueue。
+    this._diff(diffQueue,nextChildrenElements);
+    updateDepth--
+    if(updateDepth == 0){
+        //在需要的时候调用patch，执行具体的dom操作
+        this._patch(diffQueue);
+        diffQueue = [];
+    }
 }
 
